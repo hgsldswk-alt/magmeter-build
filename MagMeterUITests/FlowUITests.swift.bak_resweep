@@ -1,0 +1,296 @@
+import XCTest
+
+final class FlowUITests: XCTestCase {
+    private enum Language: String {
+        case en
+        case simplified = "zh-Hans"
+        case traditional = "zh-Hant"
+        case japanese = "ja"
+
+        var locale: String {
+            switch self {
+            case .en: "en_US"
+            case .simplified: "zh_CN"
+            case .traditional: "zh_TW"
+            case .japanese: "ja_JP"
+            }
+        }
+    }
+
+    private let app = XCUIApplication()
+
+    /// 11-27：云端模拟器冷启动后第一个启动常报 Failed to launch / launch progress（总是字母序第一个用例挂、其余全过）。
+    /// 先用一个排在最前的用例热身，启动超时记为预期内失败。
+    func testAAAWarmUpSimulator() {
+        XCTExpectFailure("云端模拟器首次启动可能超时", strict: false)
+        app.launch()
+        app.terminate()
+    }
+    private let namespace = UUID().uuidString
+    private let inputCode = "MAG1:eyJtb2RlIjoid2FsbCIsInBvc2UiOiJ1cHJpZ2h0Iiwid2luZG93U2VjIjoxMn0"
+
+    override func setUp() {
+        continueAfterFailure = false
+    }
+
+    private func launch(_ options: [String] = [], language: Language = .en, reset: Bool = true,
+                        presetText: String? = nil, presetFile: String? = nil) {
+        app.launchArguments = ["-ui-testing", "-data-id", namespace, "-AppleLanguages", "(\(language.rawValue))",
+                               "-AppleLocale", language.locale] + (reset ? ["-reset"] : []) + options
+        app.launchEnvironment = presetText.map { ["UITEST_PRESET_TEXT": $0] } ?? [:]
+        if let presetFile { app.launchEnvironment["UITEST_PRESET_FILE"] = presetFile }
+        app.launch()
+    }
+
+    private func element(_ id: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+
+    private func exists(_ id: String, timeout: TimeInterval = 8, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(element(id).waitForExistence(timeout: timeout), id, file: file, line: line)
+    }
+
+    private func touch(_ control: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(control.waitForExistence(timeout: 8), control.debugDescription, file: file, line: line)
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND enabled == true"), object: control)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 15), .completed, file: file, line: line)
+        for _ in 0..<5 {
+            if control.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(control.isHittable, control.debugDescription, file: file, line: line)
+        control.tap()
+    }
+
+    private func tap(_ id: String, file: StaticString = #filePath, line: UInt = #line) {
+        touch(app.buttons[id].firstMatch, file: file, line: line)
+    }
+
+    private func status(_ label: String, timeout: TimeInterval = 8) {
+        let predicate = NSPredicate(format: "exists == true AND label CONTAINS %@", label)
+        let waiting = XCTNSPredicateExpectation(predicate: predicate, object: element("reading.status"))
+        XCTAssertEqual(XCTWaiter.wait(for: [waiting], timeout: timeout), .completed)
+    }
+
+    private func toggle(_ id: String) {
+        let control = app.switches[id].firstMatch
+        for _ in 0..<5 {
+            if control.exists && control.isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(control.waitForExistence(timeout: 6), id)
+        control.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+    }
+
+    private func screenshot(_ name: String) throws {
+        let image = app.screenshot()
+        let attachment = XCTAttachment(screenshot: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        if let path = ProcessInfo.processInfo.environment["SHOTS_DIR"]
+            ?? ProcessInfo.processInfo.environment["TEST_RUNNER_SHOTS_DIR"] {
+            let directory = URL(fileURLWithPath: path, isDirectory: true)
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try? image.pngRepresentation.write(to: directory.appendingPathComponent(name + ".png"), options: .atomic)
+        }
+    }
+
+    func testLaunchFreezeAndShareMilestone() {
+        launch()
+        status("Live")
+        exists("reading.value")
+        XCTAssertEqual(app.alerts.count, 0)
+        tap("home.freeze")
+        status("Frozen")
+        let reading = element("reading.value").value as? String
+        XCTAssertTrue(reading?.contains("microteslas") == true)
+        XCTAssertEqual(element("reading.value").value as? String, reading)
+        tap("home.card")
+        tap("share.image")
+        exists("share.requested")
+        touch(app.buttons["share.close"])
+        tap("home.resume")
+        status("Live")
+        exists("home.milestone")
+    }
+
+    func testMetalScanAndRepeatWallPeakThenMark() {
+        launch()
+        tap("home.metal")
+        tap("scan.baseline")
+        exists("scan.slow")
+        tap("scan.end")
+        tap("home.wall")
+        tap("scan.baseline")
+        exists("scan.resweep")
+        exists("scan.similar")
+        tap("scan.mark")
+        exists("scan.marked")
+    }
+
+    func testPoseChangeAndRecoveryWithoutAdditionalTap() {
+        launch(["-scenario", "tilt"])
+        tap("home.metal")
+        tap("scan.baseline")
+        exists("scan.pose")
+        exists("scan.slow")
+    }
+
+    func testUnavailableAndRetryableSensorStates() {
+        launch(["-scenario", "unavailable"])
+        status("Sensor unavailable")
+        XCTAssertFalse(app.buttons["home.freeze"].exists)
+        launch(["-scenario", "retry"])
+        status("Reading paused")
+        tap("sensor.retry")
+        status("Live")
+        launch(["-scenario", "silent"])
+        status("Reading paused")
+        tap("sensor.retry")
+        status("Live")
+    }
+
+    func testPresetPreviewAndApplyAndHapticsDefaultOff() {
+        launch(presetText: "\n" + inputCode + "\n")
+        tap("home.settings")
+        XCTAssertEqual(app.switches["settings.haptics"].value as? String, "0")
+        toggle("settings.haptics")
+        XCTAssertEqual(app.switches["settings.haptics"].value as? String, "1")
+        toggle("settings.haptics")
+        XCTAssertEqual(app.switches["settings.haptics"].value as? String, "0")
+        tap("settings.import")
+        applyTestPreset()
+    }
+
+    func testPresetFromHomeUsesDirectImportAndRequiresNewBaseline() {
+        launch(presetText: inputCode)
+        tap("home.import")
+        applyTestPreset()
+    }
+
+    func testPresetFileFromHomePreviewsThenApplies() {
+        launch(presetFile: inputCode)
+        tap("home.importFile")
+        exists("preset.preview")
+        XCTAssertFalse(app.buttons["scan.baseline"].exists)
+        tap("preset.use")
+        exists("scan.baseline")
+        exists("scan.setup")
+    }
+
+    private func applyTestPreset() {
+        let paste = app.buttons["preset.paste"].firstMatch
+        touch(paste.exists ? paste : app.buttons["Paste"].firstMatch)
+        exists("preset.preview")
+        tap("preset.use")
+        exists("scan.baseline")
+        exists("scan.setup")
+    }
+
+    func testComparisonRetakeHistoryRenameAndExport() {
+        launch()
+        createComparison()
+        app.swipeUp()
+        tap("compare.retake")
+        tap("retake.option.0")
+        tap("retake.keep")
+        exists("record.retakes")
+        let rename = app.buttons["spot.rename.0"]
+        for _ in 0..<5 {
+            if rename.isHittable { break }
+            app.swipeDown()
+        }
+        touch(rename)
+        let field = app.textFields["rename.input"]
+        XCTAssertTrue(field.waitForExistence(timeout: 6))
+        let length = (field.value as? String)?.count ?? 1
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: length + 2) + "Desk edge")
+        tap("rename.save")
+        tap("record.csv")
+        exists("share.requested")
+    }
+
+    func testSavedComparisonCanBeReopenedAndExported() {
+        launch()
+        createComparison()
+        app.swipeDown()
+        tap("nav.back")
+        status("Live")
+
+        launch(reset: false)
+        status("Live")
+        tap("home.history")
+        tap("history.record.0")
+        exists("spot.rename.0")
+        exists("spot.rename.1")
+        tap("record.csv")
+        exists("share.requested")
+        tap("record.chart")
+        exists("share.requested")
+    }
+
+    func testLatestComparisonSharesFromHomeInTwoTaps() {
+        launch()
+        status("Live")
+        XCTAssertFalse(app.buttons["home.shareRecent"].exists)
+        createComparison()
+        app.swipeDown()
+        tap("nav.back")
+        status("Live")
+        tap("home.shareRecent")
+        exists("share.card.results")
+        exists("share.card.topics")
+        tap("share.image")
+        exists("share.requested")
+    }
+
+    func testDynamicTypeAndSpokenReading() {
+        launch(["-large-type"])
+        status("Live")
+        let reading = element("reading.value")
+        XCTAssertTrue(reading.waitForExistence(timeout: 8))
+        XCTAssertEqual(reading.label, "Field strength")
+        XCTAssertTrue((reading.value as? String)?.contains("microteslas") == true)
+        tap("home.freeze")
+        status("Frozen")
+    }
+
+    func testStoreEnglish() throws { try storeScreens(.en) }
+    func testStoreSimplifiedChinese() throws { try storeScreens(.simplified) }
+    func testStoreTraditionalChinese() throws { try storeScreens(.traditional) }
+    func testStoreJapanese() throws { try storeScreens(.japanese) }
+
+    private func createComparison() {
+        tap("home.compare")
+        tap("scan.baseline")
+        tap("compare.capture")
+        exists("spot.rename.0")
+        tap("compare.capture")
+        exists("spot.rename.1")
+    }
+
+    private func storeScreens(_ language: Language) throws {
+        launch(["-store-shots", "-scenario", "single-peak"], language: language)
+        exists("home.freeze")
+        try screenshot("store-\(language.rawValue)-01-home")
+        tap("home.metal")
+        exists("scan.baseline")
+        try screenshot("store-\(language.rawValue)-02-metal")
+        tap("nav.back")
+        tap("home.wall")
+        tap("scan.baseline")
+        exists("scan.resweep")
+        try screenshot("store-\(language.rawValue)-03-wall")
+        tap("scan.end")
+        createComparison()
+        app.swipeUp()
+        exists("record.card")
+        try screenshot("store-\(language.rawValue)-04-compare")
+        tap("record.card")
+        exists("share.card.results")
+        exists("share.image")
+        try screenshot("store-\(language.rawValue)-05-share")
+    }
+}

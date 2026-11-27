@@ -1,0 +1,64 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "CFBundleDisplayName": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Magnetic Field"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "磁场读数"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "磁場讀數"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "磁場メーター"
+          }
+        }
+      }
+    },
+    "NSMotionUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Measure magnetic field strength and check whether the phone is held at a similar angle."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "测量磁场强度并检查手机姿势是否一致。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "測量磁場強度並檢查手機姿勢是否一致。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "磁場の強さを測り、スマホが同じくらいの角度で構えられているかを確認するために使います。"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}
